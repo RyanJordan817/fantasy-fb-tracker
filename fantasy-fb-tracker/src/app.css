@@ -329,6 +329,17 @@ body {
     margin-bottom: 4px;
 }
 
+.player-name:hover {
+    cursor: pointer;
+    background: linear-gradient(90deg, #2A7B9B, #5784C7, #6553ED);
+
+    -webkit-background-clip: text;
+    background-clip: text;
+
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
 .player-details {
     display: flex;
     gap: 10px;

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import './style.css'
+import './app.css'
+import './modal.css'
+import Modal from './Modal.tsx'
 
 type Standings ={
     team_id: number;
@@ -37,6 +39,7 @@ type Matchup = {
 
 type Roster = {
     name: string;
+    id: number;
     pos_rank: number;
     pro_team: string;
     lineup_pos: string;
@@ -67,6 +70,7 @@ function App() {
     const [selectedTeamId, setSelectedTeamId] = useState<number>(1);
     const [rosterLoading, setRosterLoading] = useState(false);
     const [teams, setTeams] = useState<Teams[] | null>(null);
+    const [isModalOpen, setIsmodalOpen] = useState<boolean>(false);
 
     const API_BASE = 'http://localhost:5000';
 
@@ -313,7 +317,12 @@ function App() {
                                 {roster && roster.length > 0 ? (
                                     roster.map((player, idx) => (
                                         <div key={`${player.name}-${idx}`} className="roster-card">
-                                            <div className="player-name">{player.name}</div>
+                                            <div 
+                                                className="player-name" 
+                                                onClick={() => setIsmodalOpen(true)}
+                                            >
+                                                {player.name}
+                                            </div>
                                             <div className="player-details">
                                                 <span className="player-position">{player.position}</span>
                                                 {player.pos_rank > 0 && (
@@ -328,6 +337,9 @@ function App() {
                                                 <span>Avg: {player.avg_points.toFixed(1)}</span>
                                                 <span>Total: {player.total_points.toFixed(1)}</span>
                                             </div>
+                                            <Modal isOpen={isModalOpen} onClose={() => setIsmodalOpen(false)}>
+                                                <h2>Player Stats Coming Soon</h2>
+                                            </Modal>
                                         </div>
                                     ))
                                 ) : (

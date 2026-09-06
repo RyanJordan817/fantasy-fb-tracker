@@ -100,6 +100,7 @@ def get_team_roster(team_id):
         for player in players:
             roster.append({
                 "name": player.name,
+                "id": player.playerId,
                 "pos_rank": player.posRank,
                 "pro_team": player.proTeam,
                 "lineup_pos": player.lineupSlot,
