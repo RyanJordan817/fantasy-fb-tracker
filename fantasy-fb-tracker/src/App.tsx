@@ -53,7 +53,16 @@ type Roster = {
     prodj_avg_pts: number;
     percent_owned: number;
     percent_start: number;
-    stats: string;
+    stats: {
+        proj_pts: string;
+        act_pts: string;
+    };
+    breakdown: {
+        proj_rec: string;
+        proj_rec_yards: string;
+        proj_rush: string;
+    };
+    week: string;
 }
 
 type Teams = {
@@ -71,6 +80,7 @@ function App() {
     const [rosterLoading, setRosterLoading] = useState(false);
     const [teams, setTeams] = useState<Teams[] | null>(null);
     const [isModalOpen, setIsmodalOpen] = useState<boolean>(false);
+    const [selectedPlayer, setSelectedPlayer] = useState<Roster | null>(null);
 
     const API_BASE = 'http://localhost:5000';
 
@@ -141,13 +151,6 @@ function App() {
         }
     };
 
-    // Allows for picking a different team roster
-    const handleTeamChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-        const team_id = parseInt(event.target.value);
-        setSelectedTeamId(team_id);
-        fetchRoster(team_id);
-    }
-
     const fetchTeams = async () => {
         try {
             const res = await fetch(`${API_BASE}/teams`);
@@ -166,6 +169,18 @@ function App() {
             console.log(`Failed to fetch teams:`, error);
             setError('Failed to load teams');
         }
+    }
+
+     // Allows for picking a different team roster
+    const handleTeamChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const team_id = parseInt(event.target.value);
+        setSelectedTeamId(team_id);
+        fetchRoster(team_id);
+    }
+
+    const handlePlayerClick = (player: Roster) => {
+        setSelectedPlayer(player);
+        setIsmodalOpen(true);
     }
 
     // Loading State
@@ -319,7 +334,7 @@ function App() {
                                         <div key={`${player.name}-${idx}`} className="roster-card">
                                             <div 
                                                 className="player-name" 
-                                                onClick={() => setIsmodalOpen(true)}
+                                                onClick={() => handlePlayerClick(player)}
                                             >
                                                 {player.name}
                                             </div>
@@ -337,9 +352,6 @@ function App() {
                                                 <span>Avg: {player.avg_points.toFixed(1)}</span>
                                                 <span>Total: {player.total_points.toFixed(1)}</span>
                                             </div>
-                                            <Modal isOpen={isModalOpen} onClose={() => setIsmodalOpen(false)}>
-                                                <h2>Player Stats Coming Soon</h2>
-                                            </Modal>
                                         </div>
                                     ))
                                 ) : (
@@ -347,6 +359,25 @@ function App() {
                                         No Roster Data Avaliable
                                     </div>
                                 )}
+
+                                {/* Modal view for player details */}
+                                <Modal isOpen={isModalOpen} onClose={() => setIsmodalOpen(false)}>
+                                    {selectedPlayer && (
+                                        <>
+                                            <h2>{selectedPlayer.name} Stats</h2>
+                                            <div className="player-grid">
+                                                <span className="week-info">Week {selectedPlayer.week}</span>
+                                                <div className="player-info">
+                                                    <span className="proj-points">Proj. Points: {selectedPlayer.stats?.proj_pts}</span>
+                                                    <span className="act-points">Actual Points: {selectedPlayer.stats?.act_pts}</span>
+                                                    <span className="proj-rec">Proj. Receptions: {selectedPlayer.breakdown?.proj_rec}</span>
+                                                    <span className="proj-rec-yards">Proj. Reception Yards: {selectedPlayer.breakdown?.proj_rec_yards}</span>
+                                                    <span className="proj-rush">Proj. Rushing Yards: {selectedPlayer.breakdown?.proj_rush}</span>
+                                                </div>
+                                            </div>
+                                        </>
+                                    )}
+                                </Modal>
                         </div>
                     )}
                 </div>

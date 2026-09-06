@@ -401,3 +401,22 @@ body {
   background-color: white;
   cursor: pointer;
 }
+
+.player-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px; 
+}
+
+.player-info {
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 14px 16px;
+    transition: all 0.2s ease;
+}
+
+.player-info span {
+  display: flex;
+  justify-content: left;
+}

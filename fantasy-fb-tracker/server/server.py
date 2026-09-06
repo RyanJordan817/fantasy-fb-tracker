@@ -95,9 +95,42 @@ def get_team_roster(team_id):
             return jsonify(f"No team found for id {team_id}"), 404
 
         print(f"team:\n {team.roster}")
+        curr_week = getattr(league, 'current_week', 1)
         players = team.roster
         roster = []
         for player in players:
+            stats_dict = {}
+            stats_bd ={}
+            if hasattr(player, 'stats') and isinstance(player.stats, dict):
+                week_data = player.stats.get(curr_week)
+                if not week_data:
+                    week_data = player.stats.get(1)
+
+                if week_data:
+                    if 'projected_points' in week_data:
+                        stats_dict["proj_pts"] = round(float(week_data['projected_points']),2)
+                    else:
+                        stats_dict["proj_pts"] = 0.0
+                    
+                    if 'points' in week_data:
+                        stats_dict["act_pts"] = round(float(week_data['points']),2)
+                    else:
+                        stats_dict["act_pts"] = 0.0
+
+                    if 'projected_breakdown' in week_data and week_data['projected_breakdown']:
+                        breakdown = week_data['projected_breakdown']
+
+                        if isinstance(breakdown, dict):
+                            stats_bd["proj_rec"] = round(float(breakdown.get('receivingReceptions', 0)),2)
+                            stats_bd["proj_rec_yards"] = round(float(breakdown.get('receivingYards', 0)),2)
+                            stats_bd["proj_rush"] = round(float(breakdown.get('rushingYards', 0)),2)
+                        else:
+                            stats_bd["proj_rec"] = 0.0
+                            stats_bd["proj_rush"] = 0.0
+                    else:
+                        stats_bd["proj_rec"] = 0.0
+                        stats_bd["proj_rush"] = 0.0
+
             roster.append({
                 "name": player.name,
                 "id": player.playerId,
@@ -114,7 +147,9 @@ def get_team_roster(team_id):
                 "prodj_avg_pts": player.projected_avg_points,
                 "percent_owned": player.percent_owned,
                 "percent_start": player.percent_started,
-                "stats": str(player.stats)
+                "stats": stats_dict,
+                "breakdown": stats_bd,
+                "week": curr_week
         })
         return jsonify(roster)
     except Exception as e:
