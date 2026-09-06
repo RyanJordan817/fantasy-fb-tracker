@@ -87,12 +87,12 @@ def get_matchups():
         return jsonify({"error": str(e)}), 500
 
 # Look at specific team roster
-@app.route('/team/<int:team_index>/roster', methods=['GET'])
-def get_team_roster(team_index):
+@app.route('/team/<int:team_id>/roster', methods=['GET'])
+def get_team_roster(team_id):
     try:
-        team = league.teams[team_index]
+        team = next((team for team in league.teams if team.team_id == team_id), None)
         if not team:
-            return jsonify(f"No team found for index {team_index}"), 400
+            return jsonify(f"No team found for id {team_id}"), 404
 
         print(f"team:\n {team.roster}")
         players = team.roster
@@ -118,6 +118,21 @@ def get_team_roster(team_index):
         return jsonify(roster)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route('/teams', methods=['GET'])
+def get_team():
+    try:
+        teams = league.teams
+        team_list = []
+        for team in teams:
+            team_list.append({
+                "name": team.team_name,
+                "team_id": team.team_id
+            })
+        return jsonify(team_list)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(port=5000, debug=True)

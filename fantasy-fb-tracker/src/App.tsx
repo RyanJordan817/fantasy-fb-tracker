@@ -53,12 +53,20 @@ type Roster = {
     stats: string;
 }
 
+type Teams = {
+    name: string;
+    team_id: number;
+}
+
 function App() {
     const [standings, setStandings] = useState<Standings[] | null>(null);
     const [matchups, setMatchups] = useState<Matchup[] | null>(null);
     const [roster, setRoster] = useState<Roster[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [selectedTeamId, setSelectedTeamId] = useState<number>(1);
+    const [rosterLoading, setRosterLoading] = useState(false);
+    const [teams, setTeams] = useState<Teams[] | null>(null);
 
     const API_BASE = 'http://localhost:5000';
 
@@ -69,7 +77,13 @@ function App() {
     const fetchAllData = async () => {
         setLoading(true);
         setError(null);
-        await Promise.all([fetchStandings(), fetchMatchups(), fetchRoster()]);
+        try {
+            await fetchStandings();
+            await fetchMatchups();
+            await fetchTeams();
+        } catch (error) {
+            console.error('Error fetching data:', error)
+        }
         setLoading(false);
     }
 
@@ -80,6 +94,8 @@ function App() {
 
                 const data = await res.json();
                 console.log('Standings:', data);
+                console.log('Standings:', data);
+                console.log('📊 Team IDs:', data.map((t: Standings) => ({ id: t.team_id, name: t.team_name })));
                 setStandings(data);
             } catch (error) {
                 console.error('Error fetching standings:', error);
@@ -101,18 +117,50 @@ function App() {
         }
     };
 
-    const fetchRoster = async () => {
-        const team_index = 0;
+    const fetchRoster = async (team_id: number) => {
+        setRosterLoading(true);
+        setError(null);
         try {
-            const res = await fetch(`${API_BASE}/team/${team_index}/roster`);
-            if (!res.ok) throw new Error (`HTTP Error! status: ${res.status}`);
+            const res = await fetch(`${API_BASE}/team/${team_id}/roster`);
+            if (!res.ok) throw new Error (`HTTP Error! Status: ${res.status}`);
 
             const data = await res.json();
-            console.log('Roster:', data);
+            console.log('Roster for team:', team_id, ':', data);
             setRoster(data);
         } catch (error) {
-            console.error(`Error fecthing roster for team index ${team_index}:`, error);
-            setError('Failed to load roster')
+            console.error(`Error fecthing roster for team ${team_id}:`, error);
+            const teamName = teams?.[team_id]?.name || `Team ${team_id}`;
+            setError(`Failed to load roster for team ${teamName}`);
+            setRoster(null);
+        } finally {
+            setRosterLoading(false);
+        }
+    };
+
+    // Allows for picking a different team roster
+    const handleTeamChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
+        const team_id = parseInt(event.target.value);
+        setSelectedTeamId(team_id);
+        fetchRoster(team_id);
+    }
+
+    const fetchTeams = async () => {
+        try {
+            const res = await fetch(`${API_BASE}/teams`);
+            if (!res.ok) throw new Error (`HTTP Error! status: ${res.status}`)
+
+            const data = await res.json();
+            console.log('Teams:', data);
+            setTeams(data);
+
+            if (data && data.length > 0) {
+                const firstTeamId = data[0].team_id;
+                setSelectedTeamId(firstTeamId);
+                await fetchRoster(firstTeamId);
+            }
+        } catch (error) {
+            console.log(`Failed to fetch teams:`, error);
+            setError('Failed to load teams');
         }
     }
 
@@ -133,7 +181,7 @@ function App() {
     }
 
     // Error State
-    if (error) {
+    if (error && !rosterLoading) {
         return (
             <div className="app">
                 <header className="app-header">
@@ -240,35 +288,55 @@ function App() {
                     <div className="section-header">
                         Team Roster:
                         <span className="badge">{roster?.length || 0} Players</span>
+                        
+                        {/* Team Selector Dropdwon */}
+                        <select
+                            className="team-selector"
+                            value={selectedTeamId || ''}
+                            onChange={handleTeamChange}
+                        >
+                            {teams?.map((team) => (
+                                <option key={team.team_id} value={team.team_id}>
+                                    {team.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
 
-                    <div className="roster-grid">
-                            {roster && roster.length > 0 ? (
-                                roster.map((player, idx) => (
-                                    <div key={idx} className="roster-card">
-                                        <div className="player-name">{player.name}</div>
-                                        <div className="player-details">
-                                            <span className="player-position">{player.position}</span>
-                                            {player.pos_rank > 0 && (
-                                                <span className="player-rank">#{player.pos_rank}</span>
-                                            )}
-                                            <span className="player-team">{player.pro_team}</span>
-                                            {player.injury_status && player.injury_status !== 'Healthy' && (
-                                                <span className="injury-badge">{player.injury_status}</span>
-                                            )}
+                    {rosterLoading ? (
+                        <div style={{ textAlign: 'center', padding: '40px' }}>
+                            <div className="loading=spinner"></div>
+                            <p style={{ color: '#6b7280', marginTop: '12px'}}>Loading Roster...</p>
+                        </div>
+                    ) : (
+                        <div className="roster-grid">
+                                {roster && roster.length > 0 ? (
+                                    roster.map((player, idx) => (
+                                        <div key={`${player.name}-${idx}`} className="roster-card">
+                                            <div className="player-name">{player.name}</div>
+                                            <div className="player-details">
+                                                <span className="player-position">{player.position}</span>
+                                                {player.pos_rank > 0 && (
+                                                    <span className="player-rank">#{player.pos_rank}</span>
+                                                )}
+                                                <span className="player-team">{player.pro_team}</span>
+                                                {player.injury_status && player.injury_status !== 'Healthy' && (
+                                                    <span className="injury-badge">{player.injury_status}</span>
+                                                )}
+                                            </div>
+                                            <div className="player-stats">
+                                                <span>Avg: {player.avg_points.toFixed(1)}</span>
+                                                <span>Total: {player.total_points.toFixed(1)}</span>
+                                            </div>
                                         </div>
-                                        <div className="player-stats">
-                                            <span>Avg: {player.avg_points.toFixed(1)}</span>
-                                            <span>Total: {player.total_points.toFixed(1)}</span>
-                                        </div>
+                                    ))
+                                ) : (
+                                    <div style={{ textAlign: 'center', padding: '20px', color: '#6b7280' }}>
+                                        No Roster Data Avaliable
                                     </div>
-                                ))
-                            ) : (
-                                <div style={{ textAlign: 'center', padding: '20px', color: '#6b7280' }}>
-                                    No Roster Data Avaliable
-                                </div>
-                            )}
-                    </div>
+                                )}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

@@ -380,3 +380,13 @@ body {
     padding: 0 8px;
     border-radius: 4px;
 }
+
+.team-selector {
+  margin-left: auto;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  font-size: 14px;
+  background-color: white;
+  cursor: pointer;
+}
