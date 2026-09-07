@@ -118,18 +118,28 @@ def get_team_roster(team_id):
                         stats_dict["act_pts"] = 0.0
 
                     if 'projected_breakdown' in week_data and week_data['projected_breakdown']:
-                        breakdown = week_data['projected_breakdown']
+                        proj_breakdown = week_data['projected_breakdown']
 
-                        if isinstance(breakdown, dict):
-                            stats_bd["proj_rec"] = round(float(breakdown.get('receivingReceptions', 0)),2)
-                            stats_bd["proj_rec_yards"] = round(float(breakdown.get('receivingYards', 0)),2)
-                            stats_bd["proj_rush"] = round(float(breakdown.get('rushingYards', 0)),2)
+                        if isinstance(proj_breakdown, dict):
+                            stats_bd["proj_rec"] = round(float(proj_breakdown.get('receivingReceptions', 0)),2)
+                            stats_bd["proj_rec_yards"] = round(float(proj_breakdown.get('receivingYards', 0)),2)
+                            stats_bd["proj_rush"] = round(float(proj_breakdown.get('rushingYards', 0)),2)
+                            stats_bd["proj_rec_td"] = round(float(proj_breakdown.get('receivingTouchdowns', 0)),2)
+                            stats_bd["proj_rush_td"] = round(float(proj_breakdown.get('rushingTouchdowns', 0)),2)
+                            stats_bd["proj_pass"] = round(float(proj_breakdown.get('passingYards', 0)),2)
+                            stats_bd["proj_pass_td"] = round(float(proj_breakdown.get('passingTouchdowns', 0)),2)
                         else:
                             stats_bd["proj_rec"] = 0.0
+                            stats_bd["proj_rec_yards"] = 0.0
                             stats_bd["proj_rush"] = 0.0
+                            stats_bd["proj_pass"] = 0.0
+                            stats_bd["proj_pass_td"] = 0.0
                     else:
                         stats_bd["proj_rec"] = 0.0
+                        stats_bd["proj_rec_yards"] = 0.0
                         stats_bd["proj_rush"] = 0.0
+                        stats_bd["proj_pass"] = 0.0
+                        stats_bd["proj_pass_td"] = 0.0
 
             roster.append({
                 "name": player.name,
