@@ -1,13 +1,30 @@
 import os
 from espn_api.football import League
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
+from ml_service import NFLPlayerProjector
+import logging
 
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app, origins=['http://localhost:5173', 'http://localhost:5174'])
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+ml_projector = NFLPlayerProjector()
+
+try:
+    ml_projector.load_models()
+    logger.info("Loading existing ML models")
+except:
+    logger.info("Training new ML models...")
+
+    ml_projector.train_models(seasons=[2019, 2020, 2021, 2022, 2023])
+    ml_projector.save_models()
+    logger.info("ML models trained and saved")
 
 try: 
     league_id = int(os.getenv('LEAGUE_ID'))
@@ -30,6 +47,54 @@ except Exception as e:
     print(f"Error initializing league: {e}")
     league = None
 
+# Player Predictions
+@app.route('/predict/player', methods=['POST'])
+def predict_player():
+    """
+    Predict fantasy points for a specific player
+    Request body: {"player_name": "Patrick Mahomes", "position": "QB", "team": "KC"}
+    """
+    try:
+        data = request.json
+        player_name = data.get('player_name')
+        pos = data.get('position')
+        team = data.get('team', '')
+
+        if not player_name or not pos:
+            return jsonify({"error": "player_name and position are required"}), 400
+
+        player_info = None
+        for team_obj in league.teams:
+            for player in team_obj.roster:
+                if player.name.lower() == player_name.lower():
+                    player_info = {
+                        'name': player.name,
+                        'position': pos,
+                        'team': team
+                    }
+                    break
+                if player_info:
+                    break
+
+            if not player_info:
+                return jsonify({"error": "Player not found"}), 404
+
+            prediction = ml_projector.predict_player(
+                player_info['name'],
+                player_info['position'],
+                player_info['team']
+            )
+
+            return jsonify({
+                "player": player_info['name'],
+                "position": player_info['position'],
+                "predicted_points": prediction,
+                "confidence": "medium"
+            })
+
+    except Exception as e:
+        logger.error(f"Error predicting player: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Fetch cirrent standings
 @app.route('/standings', methods=['GET'])

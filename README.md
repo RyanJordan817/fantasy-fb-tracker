@@ -9,7 +9,7 @@
 
 ## Tech Stack
 - React + TypeScript (Vite)
-- Python backend
+- Python + Flask backend
 
 ## Features
 - Displays current league standings

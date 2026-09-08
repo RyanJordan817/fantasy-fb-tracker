@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
@@ -192,5 +193,58 @@ class NFLPlayerProjector:
         prediction = self.models[pos].predict(x_scaled)[0]
 
         return round(prediction, 2)
+
+    def predict_roster(self, roster_data):
+        """
+        Predict points for entire roster
+        """
+        predictions = []
+        for player in roster_data:
+            pred = self.predict_player(
+                player['name'],
+                player['position'],
+                player.get('pro_team', '')
+            )
+            predictions.append({
+                'player': player['name'],
+                'position': player['position'],
+                'predicted_points': pred
+            })
+
+        return predictions
+
+    def save_models(self, path='models/'):
+        """
+        Save trained models to disk
+        """
+        os.makedirs(path, exist_ok=True)
+
+        for position in self.models:
+            joblib.dump(self.models[position], f'{path}/model_{position}.pkl')
+            joblib.dump(self.scalers[position], f'{path}/scaler_{position}.pkl')
+
+        with open(f'{path}/feature_columns.txt', 'w') as f:
+            for position, cols in self.feature_columns.items():
+                f.write(f'{position}: {",".join(cols)}\n')
+
+    def load_models(self, path='models/'):
+        """
+        Load trained models from disk
+        """
+        for pos in ['QB', 'RB', 'TE', 'WR']:
+            model_path = f'{path}/model_{pos}.pkl'
+            scaler_path = f'{path}/model_{pos}.pkl'
+
+            if os.path.exists(model_path) and os.path.exists(scaler_path):
+                self.models[pos] = joblib.load(model_path)
+                self.scalers[pos] = joblib.load(scaler_path)
+
+        if os.path.exists(f'{path}/feature_columns.txt'):
+            with open(f'{path}/feature_clumns.txt', 'r') as f:
+                for line in f:
+                    if ': ' in line:
+                        pos, cols = line.strip().split(': ')
+                        self.feature_columns[pos] = cols.split(',')
+
 
 
