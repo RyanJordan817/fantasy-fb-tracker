@@ -420,3 +420,119 @@ body {
   display: flex;
   justify-content: left;
 }
+
+/* Projections Styles */
+.projections-container {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    margin: 20px 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.filter-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 12px 0;
+}
+
+.filter-btn {
+    padding: 6px 14px;
+    border: 1px solid #e5e7eb;
+    border-radius: 20px;
+    background: white;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 14px;
+}
+
+.filter-btn:hover {
+    background: #f3f4f6;
+}
+
+.filter-btn.active {
+    background: #3b82f6;
+    color: white;
+    border-color: #3b82f6;
+}
+
+.projections-grid {
+    display: grid;
+    gap: 8px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.projection-card {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    transition: all 0.2s;
+}
+
+.projection-card:hover {
+    background: #f0f1f3;
+    transform: translateX(4px);
+}
+
+.projection-card .rank {
+    width: 30px;
+    font-weight: 600;
+    color: #6b7280;
+    text-align: center;
+}
+
+.projection-card .player-info {
+    flex: 1;
+    padding: 0 12px;
+}
+
+.projection-card .player-name {
+    font-weight: 500;
+    color: #1f2937;
+}
+
+.projection-card .player-details {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 4px;
+    font-size: 12px;
+}
+
+.position-badge {
+    background: #dbeafe;
+    color: #1e40af;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 500;
+}
+
+.projection-points {
+    text-align: right;
+    min-width: 60px;
+}
+
+.projection-points .points {
+    font-size: 20px;
+    font-weight: 700;
+    color: #1f2937;
+}
+
+.projection-points .points-label {
+    font-size: 12px;
+    color: #6b7280;
+    margin-left: 4px;
+}
+
+.injury-badge {
+    background: #fee2e2;
+    color: #dc2626;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+}

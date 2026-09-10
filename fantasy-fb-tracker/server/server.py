@@ -96,6 +96,42 @@ def predict_player():
         logger.error(f"Error predicting player: {e}")
         return jsonify({"error": str(e)}), 500
 
+# Get weekly projections
+@app.route('/projections/weekly', methods=['GET'])
+def get_weekly_projections():
+    """
+    Get weekly projections for all players
+    """
+    try:
+        all_players = []
+        for team in league.teams:
+            for player in team.roster:
+                # Use ML predictions if available
+                ml_pred = ml_projector.predict_player(
+                    player.name,
+                    player.position,
+                    player.proTeam
+                )
+                
+                all_players.append({
+                    "player_name": player.name,
+                    "position": player.position,
+                    "team": team.team_name,
+                    "projected_points": ml_pred if ml_pred else player.projected_avg_points,
+                    "pro_team": player.proTeam,
+                    "injury_status": player.injuryStatus,
+                    "percent_owned": player.percent_owned
+                })
+        
+        # Sort by projected points
+        all_players.sort(key=lambda x: x['projected_points'] or 0, reverse=True)
+        
+        return jsonify(all_players)
+        
+    except Exception as e:
+        logger.error(f"Error getting weekly projections: {e}")
+        return jsonify({"error": str(e)}), 500
+
 # Fetch cirrent standings
 @app.route('/standings', methods=['GET'])
 def get_standings():

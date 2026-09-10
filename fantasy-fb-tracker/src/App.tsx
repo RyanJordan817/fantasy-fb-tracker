@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import './app.css'
 import './modal.css'
 import Modal from './Modal.tsx'
+import Projections from './Projections.tsx'
 
 type Standings ={
     team_id: number;
@@ -192,8 +193,8 @@ function App() {
         return (
             <div className="app">
                 <header className="app-header">
-                    <h1>Fantasy Football Tracker</h1>
-                    <div className="subtitle"> 2026 Season</div>
+                    <h1>🏈 Football for Dummies</h1>
+                    <div className="subtitle">2026 Season</div>
                 </header>
                 <div className="loading">
                     <div className="loading-spinner"></div>
@@ -208,7 +209,7 @@ function App() {
         return (
             <div className="app">
                 <header className="app-header">
-                    <h1>🏈 Fantasy Football Tracker</h1>
+                    <h1>🏈 Football for Dummies</h1>
                     <div className="subtitle">2026 Season</div>
                 </header>
                 <div className="error">
@@ -222,9 +223,11 @@ function App() {
 	return (
         <div className="app">
             <header className="app-header">
-                <h1>Fantasy Football Tracker</h1>
+                <h1>🏈 Football for Dummies</h1>
                 <div className="subtitle">2026 Season</div>
             </header>
+
+            <Projections />
 
             {/* Standings Section */}
             <div className="section-container">
