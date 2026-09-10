@@ -18,6 +18,8 @@ ml_projector = NFLPlayerProjector()
 
 try:
     ml_projector.load_models()
+    if not ml_projector.models:
+        raise FileNotFoundError("No trained ML models found")
     logger.info("Loading existing ML models")
 except:
     logger.info("Training new ML models...")
@@ -131,6 +133,119 @@ def get_weekly_projections():
     except Exception as e:
         logger.error(f"Error getting weekly projections: {e}")
         return jsonify({"error": str(e)}), 500
+
+@app.route('/analytics/player/<int:player_id>', methods=['GET'])
+def get_player_analytics(player_id):
+    try:
+        target_player = None
+
+        for team in league.teams:
+            for player in team.roster:
+                if player.playerId == player_id:
+                    target_player = player
+                    break
+
+        if target_player is None:
+            return jsonify({"error": "Player not found"}), 404
+
+        position = target_player.position
+        ml_result = ml_projector.predict_player_with_confidence(
+            target_player.name,
+            position,
+            target_player.proTeam
+        )
+
+        current_week = getattr(league, 'current_week', 1)
+
+        if ml_result is None:
+            fallback_projection = getattr(
+                target_player,
+                'projected_avg_points',
+                0
+            ) or 0
+            ml_result = {
+                "prediction": round(float(fallback_projection), 2),
+                "lower_bound": round(max(0, float(fallback_projection) * 0.7), 2),
+                "upper_bound": round(float(fallback_projection) * 1.3, 2),
+                "confidence": 0
+            }
+
+        history = []
+
+        for week, week_data in getattr(target_player, 'stats', {}).items():
+            if not isinstance(week_data, dict):
+                continue
+
+            actual = week_data.get('points')
+            espn_projection = week_data.get('projected_points')
+
+            if actual is None and espn_projection is None:
+                continue
+
+            history.append({
+                "week": int(week),
+                "actual": round(float(actual or 0), 2),
+                "espn_projection": round(float(espn_projection or 0), 2)
+            })
+
+        history.sort(key=lambda item: item["week"])
+
+        recent_actuals = [
+            item["actual"] for item in history
+            if item["week"] <= current_week
+        ]
+
+        recent_avg = (
+            sum(recent_actuals[-5:]) / len(recent_actuals[-5:])
+            if recent_actuals
+            else 0
+        )
+
+        future_forecast = []
+
+        for week in range(current_week + 1, 15):
+            adjustment = 1 + ((week % 3) - 1 ) * 0.06
+            projection = ml_result["prediction"] * adjustment
+
+
+            future_forecast.append({
+                    "week": week,
+                    "espn_projection": None,
+                    "ml_projection": round(projection, 2),
+                    "lower_bound": round(
+                        max(0, projection - (
+                            ml_result["prediction"] -
+                            ml_result["lower_bound"]
+                        )),
+                        2
+                    ),
+                    "upper_bound": round(
+                        projection + (
+                            ml_result["upper_bound"] -
+                            ml_result["prediction"]
+                        ),
+                        2
+                    )
+                })
+
+
+        return jsonify({
+            "player_id": player_id,
+            "player_name": target_player.name,
+            "position": position,
+            "team": target_player.proTeam,
+            "current_week": current_week,
+            "recent_average": round(recent_avg, 2),
+            "current_projection": ml_result["prediction"],
+            "confidence": ml_result["confidence"],
+            "history": history,
+            "future_forecast": future_forecast
+        })
+
+    except Exception as error:
+        logger.error(f"Error getting player analytics: {error}")
+        return jsonify({"error": str(error)}), 500
+
 
 # Fetch cirrent standings
 @app.route('/standings', methods=['GET'])

@@ -3,6 +3,7 @@ import './app.css'
 import './modal.css'
 import Modal from './Modal.tsx'
 import Projections from './Projections.tsx'
+import PlayerAnalytics from './PlayerAnalytics.tsx'
 
 type Standings ={
     team_id: number;
@@ -368,72 +369,67 @@ function App() {
                                 )}
 
                                 {/* Modal view for player details */}
-                                <Modal isOpen={isModalOpen} onClose={() => setIsmodalOpen(false)}>
+                                <Modal 
+                                    isOpen={isModalOpen} 
+                                    onClose={() => setIsmodalOpen(false)}
+                                >
                                     {selectedPlayer && (
                                         <>
                                             <div className="modal-header">
-                                                <h2>{selectedPlayer.name} Stats</h2>
+                                                <h2>{selectedPlayer.name} Analytics</h2>
                                                 <span className="week-badge">Week {selectedPlayer.week}</span>
                                             </div>
 
-                                            <div className="stats-container">
-                                                <div className="stats-grid">
-                                                    <div className="stat-card projected">
-                                                        <div className="stat-label">Projected Points: </div>
-                                                        <div className="stat-vlaue">{selectedPlayer.stats?.proj_pts || 'N/A'}</div>
-                                                    </div>
-                                                    <div className="stat-card actual">
-                                                        <div className="stat-label">Actual Points: </div>
-                                                        <div className="stat-value">{selectedPlayer.stats?.act_pts || 'N/A'}</div>
-                                                    </div>
+                                            <PlayerAnalytics playerId={selectedPlayer.id}/>
+                                            
 
-                                                    <div className="breakdown-section">
-                                                        <h3 className="breakdown-title">Breakdown</h3>
-                                                        <div className="breakdown-grid">
-                                                            {(selectedPlayer.position === 'WR' || selectedPlayer.position === 'TE' || selectedPlayer.position === 'RB') && (
-                                                                <div className="breadown-item">
-                                                                    <span className="breakdown-label">Projected Receptions: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rec || 'N/A'}</span>
-                                                                </div>
-                                                            )}
-                                                            {(selectedPlayer.position === 'WR' || selectedPlayer.position === 'TE' || selectedPlayer.position === 'RB') && (
-                                                                <div className="breadown-item">                                                              
-                                                                    <span className="breakdown-label">Projected Reception Yards: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rec_yards || 'N/A'}</span>
-                                                                </div>
-                                                            )}
-                                                            {(selectedPlayer.position === 'WR' || selectedPlayer.position === 'TE' || selectedPlayer.position === 'RB') && (
-                                                                <div className="breadown-item">                                                              
-                                                                    <span className="breakdown-label">Projected Reception TDs: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rec_td || 'N/A'}</span>
-                                                                </div>
-                                                            )}
-                                                            {(selectedPlayer.position === 'RB' || selectedPlayer.position === 'QB') && (
-                                                                <div className="breadown-item">
-                                                                    <span className="breakdown-label">Projected Rushing Yards: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rush || 'N/A'}</span>
-                                                                </div>
-                                                            )}
-                                                            {(selectedPlayer.position === 'RB' || selectedPlayer.position === 'QB') && (
-                                                                <div className="breadown-item">
-                                                                    <span className="breakdown-label">Projected Rushing TDs: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rush_td || 'N/A'}</span>
-                                                                </div>
-                                                            )}
-                                                            {(selectedPlayer.position === 'QB') && (
-                                                                <div className="breadown-item">
-                                                                    <span className="breakdown-label">Projected Passing Yards: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_pass || 'N/A'}</span>
-                                                                </div>
-                                                            )}
-                                                            {(selectedPlayer.position === 'QB') && (
-                                                                <div className="breadown-item">
-                                                                    <span className="breakdown-label">Projected Passing TDs: </span>
-                                                                    <span className="breakdown-value">{selectedPlayer.breakdown?.proj_pass_td || 'N/A'}</span>
-                                                                </div>
-                                                            )}
+                                            <div className="breakdown-section">
+                                                <h3 className="breakdown-title">
+                                                    ESPN Breakdown
+                                                </h3>
+                                                <div className="breakdown-grid">
+                                                    {(selectedPlayer.position === 'WR' || selectedPlayer.position === 'TE' || selectedPlayer.position === 'RB') && (
+                                                        <div className="breadown-item">
+                                                            <span className="breakdown-label">Projected Receptions: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rec || 'N/A'}</span>
                                                         </div>
-                                                    </div>
+                                                    )}
+                                                    {(selectedPlayer.position === 'WR' || selectedPlayer.position === 'TE' || selectedPlayer.position === 'RB') && (
+                                                        <div className="breadown-item">                                                              
+                                                            <span className="breakdown-label">Projected Reception Yards: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rec_yards || 'N/A'}</span>
+                                                        </div>
+                                                    )}
+                                                    {(selectedPlayer.position === 'WR' || selectedPlayer.position === 'TE' || selectedPlayer.position === 'RB') && (
+                                                        <div className="breadown-item">                                                              
+                                                            <span className="breakdown-label">Projected Reception TDs: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rec_td || 'N/A'}</span>
+                                                        </div>
+                                                    )}
+                                                    {(selectedPlayer.position === 'RB' || selectedPlayer.position === 'QB') && (
+                                                        <div className="breadown-item">
+                                                            <span className="breakdown-label">Projected Rushing Yards: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rush || 'N/A'}</span>
+                                                        </div>
+                                                    )}
+                                                    {(selectedPlayer.position === 'RB' || selectedPlayer.position === 'QB') && (
+                                                        <div className="breadown-item">
+                                                            <span className="breakdown-label">Projected Rushing TDs: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_rush_td || 'N/A'}</span>
+                                                        </div>
+                                                    )}
+                                                    {(selectedPlayer.position === 'QB') && (
+                                                        <div className="breadown-item">
+                                                            <span className="breakdown-label">Projected Passing Yards: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_pass || 'N/A'}</span>
+                                                        </div>
+                                                    )}
+                                                    {(selectedPlayer.position === 'QB') && (
+                                                        <div className="breadown-item">
+                                                            <span className="breakdown-label">Projected Passing TDs: </span>
+                                                            <span className="breakdown-value">{selectedPlayer.breakdown?.proj_pass_td || 'N/A'}</span>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </>

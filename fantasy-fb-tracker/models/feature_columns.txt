@@ -1,0 +1,4 @@
+QB: passing_yds,passing_td,passing_att,rushing_yds,rushing_td,avg_passing_yds_last_5,avg_rushing_yds_last_5
+RB: receptions,receiving_yds,receiving_td,rushing_yds,rushing_td,avg_receiving_yds_last_5,avg_rushing_yds_last_5,avg_receptions_last_5
+WR: receptions,receiving_yds,receiving_td,rushing_yds,rushing_td,avg_receiving_yds_last_5,avg_rushing_yds_last_5,avg_receptions_last_5
+TE: receptions,receiving_yds,receiving_td,rushing_yds,rushing_td,avg_receiving_yds_last_5,avg_rushing_yds_last_5,avg_receptions_last_5

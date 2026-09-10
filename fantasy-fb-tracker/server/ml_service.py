@@ -15,7 +15,7 @@ class NFLPlayerProjector:
     def __init__(self):
         self.models= {}
         self.scalers = {}
-        self.feature_columns = []
+        self.feature_columns = {}
         self.last_trained = None
 
     def fetch_historical_data(self, seasons=[2020, 2021, 2022, 2023, 2024]):
@@ -24,16 +24,22 @@ class NFLPlayerProjector:
         """
         print(f"Fetching data for seasons: {seasons}")
 
-        player_stats = nfl.import_seasonal_data(seasons)
+        player_stats = nfl.load_player_stats(
+            seasons,
+            summary_level='week'
+        ).to_dicts()
 
-        player_info = nfl.import_rosters(seasons)
+        player_stats = pd.DataFrame(player_stats)
 
-        merged_data= pd.merge(
-            player_stats,
-            player_info[['player_id', 'postion', 'team']],
-            on='player_id',
-            how='left'
-        )
+        merged_data = player_stats.rename(columns={
+            'passing_yards': 'passing_yds',
+            'passing_tds': 'passing_td',
+            'attempts': 'passing_att',
+            'rushing_yards': 'rushing_yds',
+            'rushing_tds': 'rushing_td',
+            'receiving_yards': 'receiving_yds',
+            'receiving_tds': 'receiving_td'
+        })
 
         merged_data = self._engineer_features(merged_data)
 
@@ -46,7 +52,7 @@ class NFLPlayerProjector:
 
         # Create featur columns
         df['fantasy_points'] = df['passing_yds']*0.04 + df['passing_td']*4 + \
-                                df['rushin_yds']*0.01 + df['rushing_td']*6 + \
+                    df['rushing_yds']*0.01 + df['rushing_td']*6 + \
                                 df['receiving_yds']*0.1 + df['receiving_td']*6 + \
                                 df['receptions']*1
 
@@ -161,7 +167,7 @@ class NFLPlayerProjector:
         return self
 
 
-    def predict_player(self, player, pos, team):
+    def predict_player_with_confidence(self, player, pos, team):
         """"
         Predict points for a single player
         """
@@ -179,21 +185,44 @@ class NFLPlayerProjector:
             'rushing_td': 0.3,
             'receiving_yds': 50,
             'receiving_td': 0.4,
-            'receptions': 5
+            'receptions': 5,
+            'avg_passing_yds_last_5': 250,
+            'avg_rushing_yds_last_5': 30,
+            'avg_receiving_yds_last_5': 50,
+            'avg_receptions_last_5': 5,
+            'age': 27
         }
 
-        feature_vector = []
-        for feat in features:
-            if feat in default_vals:
-                feature_vector.append(default_vals[feat])
-            else:
-                feature_vector.append(0)
+        feature_vector = [
+            default_vals.get(feature, 0)
+            for feature in features
+        ]
 
-        x_scaled = self.scalers[pos].transform([feature_vector])
-        prediction = self.models[pos].predict(x_scaled)[0]
+        scaled = self.scalers[pos].transform([feature_vector])
+        model = self.models[pos]
 
-        return round(prediction, 2)
+        tree_predictions = np.array([
+            estimator.predict(scaled)[0]
+            for estimator in model.estimators_
+        ])
 
+        prediction = float(tree_predictions.mean())
+        std = float(tree_predictions.std())
+
+        return {
+            "prediction": round(prediction, 2),
+            "lower_bound": round(max(0, prediction - std), 2),
+            "upper_bound": round(prediction + std, 2),
+            "confidence": round(
+                min(0.95, max(0.35, 1- std/max(prediction,1))), 2
+            )
+        }
+
+    def predict_player(self, player, pos, team):
+        """Return the point estimate used by the weekly projections endpoint."""
+        result = self.predict_player_with_confidence(player, pos, team)
+        return result["prediction"] if result else None
+    
     def predict_roster(self, roster_data):
         """
         Predict points for entire roster
@@ -233,15 +262,17 @@ class NFLPlayerProjector:
         """
         for pos in ['QB', 'RB', 'TE', 'WR']:
             model_path = f'{path}/model_{pos}.pkl'
-            scaler_path = f'{path}/model_{pos}.pkl'
+            scaler_path = f'{path}/scaler_{pos}.pkl'
 
             if os.path.exists(model_path) and os.path.exists(scaler_path):
                 self.models[pos] = joblib.load(model_path)
                 self.scalers[pos] = joblib.load(scaler_path)
 
-        if os.path.exists(f'{path}/feature_columns.txt'):
-            with open(f'{path}/feature_clumns.txt', 'r') as f:
-                for line in f:
+        feature_path = f'{path}/feature_columns.txt'
+
+        if os.path.exists(feature_path):
+            with open(feature_path, 'r') as file:
+                for line in file:
                     if ': ' in line:
                         pos, cols = line.strip().split(': ')
                         self.feature_columns[pos] = cols.split(',')
