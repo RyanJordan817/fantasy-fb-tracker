@@ -24,7 +24,7 @@ try:
 except:
     logger.info("Training new ML models...")
 
-    ml_projector.train_models(seasons=[2019, 2020, 2021, 2022, 2023])
+    ml_projector.train_models(seasons=[2019, 2020, 2021, 2022, 2023, 2024])
     ml_projector.save_models()
     logger.info("ML models trained and saved")
 
@@ -65,6 +65,9 @@ def predict_player():
         if not player_name or not pos:
             return jsonify({"error": "player_name and position are required"}), 400
 
+        if league is None:
+            return jsonify({"error": "league not initailized"}), 503
+
         player_info = None
         for team_obj in league.teams:
             for player in team_obj.roster:
@@ -81,17 +84,31 @@ def predict_player():
             if not player_info:
                 return jsonify({"error": "Player not found"}), 404
 
-            prediction = ml_projector.predict_player(
-                player_info['name'],
-                player_info['position'],
-                player_info['team']
-            )
+            try: 
+                ml_result = ml_projector.predict_player_with_confidence(
+                    player_info['name'],
+                    player_info['position'],
+                    player_info['team']
+                )
+            except Exception as e:
+                logger.warning(f"ML prediction failed for {player_info['name']}: {e}")
+                ml_result = None
+
+            if ml_result is None:
+                return jsonify({
+                    "player": player_info['name'],
+                    "psition": player_info['position'],
+                    "predicted_points": None,
+                    "confidence": 0,
+                    "data_source": "unavaliable"
+                })
 
             return jsonify({
                 "player": player_info['name'],
                 "position": player_info['position'],
-                "predicted_points": prediction,
-                "confidence": "medium"
+                "predicted_points": ml_result["prediction"],
+                "confidence": ml_result["confidence"],
+                "data_source": ml_result.get("data_source", "model")
             })
 
     except Exception as e:
@@ -149,11 +166,16 @@ def get_player_analytics(player_id):
             return jsonify({"error": "Player not found"}), 404
 
         position = target_player.position
-        ml_result = ml_projector.predict_player_with_confidence(
-            target_player.name,
-            position,
-            target_player.proTeam
-        )
+
+        try: 
+            ml_result = ml_projector.predict_player_with_confidence(
+                target_player.name,
+                position,
+                target_player.proTeam
+            )
+        except Exception as e:
+            logger.warning(f"ML prediction failed for {target_player.name}: {e}")
+            ml_result = None
 
         current_week = getattr(league, 'current_week', 1)
 
@@ -167,7 +189,8 @@ def get_player_analytics(player_id):
                 "prediction": round(float(fallback_projection), 2),
                 "lower_bound": round(max(0, float(fallback_projection) * 0.7), 2),
                 "upper_bound": round(float(fallback_projection) * 1.3, 2),
-                "confidence": 0
+                "confidence": 0,
+                "data_source": "espn_fallabck"
             }
 
         history = []
@@ -177,18 +200,50 @@ def get_player_analytics(player_id):
                 continue
 
             actual = week_data.get('points')
-            espn_projection = week_data.get('projected_points')
+            # ESPN's week 0 entry is a season-level projection, not a weekly value.
+            espn_projection = None if int(week) == 0 else week_data.get('projected_points')
 
             if actual is None and espn_projection is None:
                 continue
 
-            history.append({
+            history_item = {
                 "week": int(week),
                 "actual": round(float(actual or 0), 2),
                 "espn_projection": round(float(espn_projection or 0), 2)
-            })
+            }
+
+            if actual is not None and int(week) > 0:
+                try:
+                    historical_prediction = ml_projector.predict_player_with_confidence(
+                        target_player.name,
+                        position,
+                        target_player.proTeam,
+                        season=year,
+                        as_of_week=int(week)
+                    )
+                    if historical_prediction is not None:
+                        history_item["ml_projection"] = historical_prediction["prediction"]
+                except Exception as error:
+                    logger.warning(
+                        f"Historical ML prediction failed for {target_player.name} week {week}: {error}"
+                    )
+
+            history.append(history_item)
 
         history.sort(key=lambda item: item["week"])
+
+        evaluated_history = [
+            item for item in history
+            if item.get("ml_projection") is not None and item.get("actual") is not None
+        ]
+        errors = [item["ml_projection"] - item["actual"] for item in evaluated_history]
+        ml_evaluation = {
+            "weeks_evaluated": len(evaluated_history),
+            "mean_absolute_error": round(
+                sum(abs(error) for error in errors) / len(errors), 2
+            ) if errors else None,
+            "average_error": round(sum(errors) / len(errors), 2) if errors else None
+        }
 
         recent_actuals = [
             item["actual"] for item in history
@@ -238,7 +293,9 @@ def get_player_analytics(player_id):
             "recent_average": round(recent_avg, 2),
             "current_projection": ml_result["prediction"],
             "confidence": ml_result["confidence"],
+            "data_source": ml_result.get("data_source", "model"),
             "history": history,
+            "ml_evaluation": ml_evaluation,
             "future_forecast": future_forecast
         })
 

@@ -581,6 +581,37 @@ body {
     color: #1e293b;
 }
 
+.analytics-note {
+  margin: -6px 0 14px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.accuracy-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.accuracy-summary > div {
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.accuracy-summary span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.accuracy-summary strong {
+  color: #1e293b;
+}
+
 .forecast-table table {
     width: 100%;
     border-collapse: collapse;
@@ -609,5 +640,9 @@ body {
 @media (max-width: 640px) {
     .analytics-summary {
         grid-template-columns: 1fr;
+    }
+
+    .accuracy-summary {
+      grid-template-columns: 1fr;
     }
 }
