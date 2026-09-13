@@ -21,6 +21,11 @@
 - Opens additional player statistics and projected stat breakdowns
 - Displays weekly player projections with QB, RB, WR, and TE filters
 - Uses position-specific machine learning models when generating projections
+- Shows player analytics with recent averages, ML projections, confidence estimates, and forecast ranges
+- Compares historical weekly ML projections with actual player scores
+- Reports ML evaluation metrics, including weeks tested, average miss, and average prediction error
+- Scales the forecast chart to typical player scoring ranges and excludes ESPN season-level projections from weekly chart data
+- Detects outdated saved model feature schemas and retrains models when necessary
 
 ## Set Up
 1. Clone the repository: `git clone https://github.com/RyanJordan817/fantasy-fb-tracker`
@@ -33,6 +38,8 @@
 8. Open the Vite URL shown in the terminal, usually `http://localhost:5173`.
 
 # Status
-**Working features:** League standings, weekly matchups, team rosters, player detail modals, and weekly player projections.
+**Working features:** League standings, weekly matchups, team rosters, player detail modals, weekly player projections, player analytics, forecast ranges, and historical ML accuracy tracking.
 
-**Coming Soon:** Live score tracking and more in-depth player analytics.
+**ML evaluation:** Historical projections are generated using only data available before each completed week. The app compares those projections with actual scores using mean absolute error and average signed error. These metrics are intended for testing model performance and are not calibrated probabilities of a player achieving a projection.
+
+**Coming Soon:** Live score tracking.
