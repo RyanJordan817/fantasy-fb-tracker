@@ -190,7 +190,7 @@ def get_player_analytics(player_id):
                 "lower_bound": round(max(0, float(fallback_projection) * 0.7), 2),
                 "upper_bound": round(float(fallback_projection) * 1.3, 2),
                 "confidence": 0,
-                "data_source": "espn_fallabck"
+                "data_source": "espn_fallback"
             }
 
         history = []

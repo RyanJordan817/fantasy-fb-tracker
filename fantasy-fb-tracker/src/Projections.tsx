@@ -14,7 +14,7 @@ const Projections: React.FC = () => {
     const [projections, setProjections] = useState<Projections[]>([]);
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null);
-    const [filter, setFilter] = useState<string>('All');
+    const [filter, setFilter] = useState<string>('ALL');
 
     const API_BASE = 'http://localhost:5000'
     

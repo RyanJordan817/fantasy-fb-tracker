@@ -144,7 +144,7 @@
   color: #333;
 }
 
-.breakdown-list {
+.breakdown-grid {
   display: flex;
   flex-direction: column;
   gap: 8px;
