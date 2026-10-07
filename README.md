@@ -21,11 +21,16 @@
 - Opens additional player statistics and projected stat breakdowns
 - Displays weekly player projections with QB, RB, WR, and TE filters
 - Uses position-specific machine learning models when generating projections
-- Shows player analytics with recent averages, ML projections, confidence estimates, and forecast ranges
-- Compares historical weekly ML projections with actual player scores
-- Reports ML evaluation metrics, including weeks tested, average miss, and average prediction error
+- Trains against nflreadpy weekly player stats scored with the active ESPN league's scoring settings
+- Includes a lagged historical defense-vs-position feature when generating ML projections
+- Shows ESPN and ML projections side by side, with matchup context and forecast ranges
+- Compares immutable forecasts saved before actual scores with completed player-week results
+- Keeps ESPN as the selected projection until prospective ML results beat ESPN over at least 30 player-weeks for that position
+- Loads week-by-week ESPN actual scores and projections for player analytics, with a local season cache
+- Refreshes models idempotently as completed regular-season weeks advance, excluding the current/incomplete week
+- Reports prospective ESPN and ML mean absolute error by position; weeks without saved forecasts are not backfilled into the comparison
 - Scales the forecast chart to typical player scoring ranges and excludes ESPN season-level projections from weekly chart data
-- Detects outdated saved model feature schemas and retrains models when necessary
+- Detects outdated saved model feature schemas or ESPN scoring rules and retrains models when necessary
 
 ## Set Up
 1. Clone the repository: `git clone https://github.com/RyanJordan817/fantasy-fb-tracker`
@@ -40,6 +45,8 @@
 # Status
 **Working features:** League standings, weekly matchups, team rosters, player detail modals, weekly player projections, player analytics, forecast ranges, and historical ML accuracy tracking.
 
-**ML evaluation:** Historical projections are generated using only data available before each completed week. The app compares those projections with actual scores using mean absolute error and average signed error. These metrics are intended for testing model performance and are not calibrated probabilities of a player achieving a projection.
+**Projection evaluation:** ESPN and ML forecasts are saved the first time the current week's projections are observed while the player has no recorded actual score. Those saved forecasts are immutable and are compared with ESPN actuals only after the week is complete. Historical weeks without saved forecast snapshots are excluded rather than reconstructed using a model that may have seen their scores. ESPN remains the selected projection unless the position-level prospective sample has at least 30 player-weeks and ML has lower MAE. The metrics are evaluation statistics, not calibrated probabilities.
 
-**Coming Soon:** Live score tracking.
+Players without available nflreadpy game history do not receive a fabricated positional-average prediction. The app shows an ESPN weekly projection when available, otherwise it reports that no projection is available.
+
+**Coming Soon:** Live score tracking
