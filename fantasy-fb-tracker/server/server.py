@@ -1,5 +1,10 @@
 import os
+import json
+import tempfile
+from threading import RLock
+from typing import Any
 from espn_api.football import League
+from espn_api.football.player import Player
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -14,40 +19,325 @@ CORS(app, origins=['http://localhost:5173', 'http://localhost:5174'])
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-ml_projector = NFLPlayerProjector()
-
+year = None
+league = None
 try:
-    ml_projector.load_models()
-    if not ml_projector.models:
-        raise FileNotFoundError("No trained ML models found")
-    logger.info("Loading existing ML models")
-except:
-    logger.info("Training new ML models...")
-
-    ml_projector.train_models(seasons=[2019, 2020, 2021, 2022, 2023, 2024])
-    ml_projector.save_models()
-    logger.info("ML models trained and saved")
-
-try: 
-    league_id = int(os.getenv('LEAGUE_ID'))
-    year = int(os.getenv('YEAR'))
+    league_id = int(os.environ['LEAGUE_ID'])
+    year = int(os.environ['YEAR'])
     espn_s2 = os.getenv('ESPN_S2')
     swid = os.getenv('SWID')
 
-    if not all([league_id, year, espn_s2, swid]):
+    if not all([espn_s2, swid]):
         raise ValueError("Missing required environment variables")
-    
+
     league = League(
-        league_id=int(league_id),
+        league_id=league_id,
         year=year,
         espn_s2=espn_s2,
         swid=swid
     )
-    print("league initialized successfully")
+    logger.info("ESPN league initialized successfully")
+except Exception:
+    logger.exception("Error initializing ESPN league")
 
-except Exception as e:
-    print(f"Error initializing league: {e}")
-    league = None
+ml_projector = None
+if league is not None:
+    scoring_format = getattr(league.settings, 'scoring_format', None)
+    if not isinstance(scoring_format, list) or not scoring_format:
+        raise ValueError("ESPN league did not provide usable scoring settings")
+    ml_projector = NFLPlayerProjector(scoring_format)
+    model_path = os.path.join(os.path.dirname(__file__), '..', 'models')
+    try:
+        ml_projector.load_models(model_path)
+        logger.info("Loaded existing ML models")
+    except (FileNotFoundError, ValueError) as error:
+        logger.info("Training ML models because saved models are unavailable or stale: %s", error)
+    if (
+        ml_projector.training_season != league.year
+        or ml_projector.training_through_week is None
+        or ml_projector.training_through_week < league.current_week - 1
+    ):
+        logger.info("Refreshing ML models with completed weeks from season %s", league.year)
+        ml_projector.train_models(
+            seasons=range(max(2019, league.year - 6), league.year + 1),
+            holdout_season=league.year - 1,
+            current_season=league.year,
+            through_week=league.current_week,
+        )
+        ml_projector.save_models(model_path)
+
+weekly_data_lock = RLock()
+WeeklyDataCache = dict[str, Any]
+weekly_data_cache: WeeklyDataCache | None = None
+weekly_data_cache_loaded = False
+WEEKLY_DATA_CACHE_VERSION = 2
+
+
+def _weekly_data_path(season: int):
+    return os.path.join(
+        os.path.dirname(__file__),
+        'data',
+        f'espn_weekly_scores_{season}.json',
+    )
+
+
+def _load_weekly_data_cache(season: int) -> WeeklyDataCache:
+    global weekly_data_cache, weekly_data_cache_loaded
+
+    if weekly_data_cache_loaded and weekly_data_cache is not None:
+        return weekly_data_cache
+
+    weekly_data_cache_loaded = True
+    path = _weekly_data_path(season)
+    try:
+        with open(path, encoding='utf-8') as cache_file:
+            stored = json.load(cache_file)
+        if (
+            stored.get('season') == season
+            and stored.get('schema_version') == WEEKLY_DATA_CACHE_VERSION
+        ):
+            weekly_data_cache = {
+                'season': season,
+                'fetched_weeks': set(stored.get('fetched_weeks', [])),
+                'players': stored.get('players', {}),
+            }
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError, AttributeError, TypeError) as error:
+        logger.warning("Unable to load ESPN weekly score cache %s: %s", path, error)
+
+    if weekly_data_cache is None:
+        weekly_data_cache = {
+            'season': season,
+            'fetched_weeks': set(),
+            'players': {},
+        }
+    return weekly_data_cache
+
+
+def _save_weekly_data_cache(cache: WeeklyDataCache):
+    path = _weekly_data_path(cache['season'])
+    directory = os.path.dirname(path)
+    os.makedirs(directory, exist_ok=True)
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode='w',
+            encoding='utf-8',
+            dir=directory,
+            delete=False,
+        ) as cache_file:
+            temporary_path = cache_file.name
+            json.dump({
+                'season': cache['season'],
+                'schema_version': WEEKLY_DATA_CACHE_VERSION,
+                'fetched_weeks': sorted(cache['fetched_weeks']),
+                'players': cache['players'],
+            }, cache_file)
+        os.replace(temporary_path, path)
+    except OSError:
+        if temporary_path and os.path.exists(temporary_path):
+            os.remove(temporary_path)
+        raise
+
+
+def _fetch_espn_weekly_data(league_instance: League, week: int):
+    data = league_instance.espn_request.league_get(params={
+        'view': 'mRoster',
+        'scoringPeriodId': week,
+    })
+    players_for_week = {}
+    for team_data in data.get('teams', []):
+        roster = team_data.get('roster', {})
+        for entry in roster.get('entries', []):
+            player = Player(entry, league_instance.year)
+            stats = player.stats.get(week, {})
+            players_for_week[str(player.playerId)] = {
+                'name': player.name,
+                'position': player.position,
+                'pro_team': player.proTeam,
+                'actual': stats.get('points'),
+                'espn_projection': stats.get('projected_points'),
+            }
+    return players_for_week
+
+
+def _player_opponent(player, week: int):
+    schedule = getattr(player, 'schedule', None)
+    if not isinstance(schedule, dict):
+        return None
+    matchup = schedule.get(str(week), {})
+    if isinstance(matchup, dict):
+        return matchup.get('team')
+    return None
+
+
+def _capture_current_week_ml_snapshots(cache: WeeklyDataCache, league_instance: League):
+    if ml_projector is None:
+        raise RuntimeError("ML projector is not initialized")
+    week = league_instance.current_week
+    live_players = {
+        str(player.playerId): player
+        for team in league_instance.teams
+        for player in team.roster
+    }
+    for player_id, player_weeks in cache['players'].items():
+        week_data = player_weeks.get(str(week))
+        player = live_players.get(player_id)
+        if (
+            not isinstance(week_data, dict)
+            or player is None
+            or week_data.get('actual') is not None
+        ):
+            continue
+        if week_data.get('espn_projection_before_week') is None:
+            week_data['espn_projection_before_week'] = week_data.get('espn_projection')
+        if week_data.get('ml_projection_before_week') is not None:
+            continue
+        try:
+            prediction = ml_projector.predict_player(
+                player.name,
+                player.position,
+                player.proTeam,
+                season=league_instance.year,
+                as_of_week=week,
+                opponent=_player_opponent(player, week),
+            )
+        except Exception as error:
+            logger.warning("Unable to snapshot ML projection for %s: %s", player.name, error)
+            continue
+        if prediction is not None:
+            week_data['ml_projection_before_week'] = prediction
+            week_data['ml_snapshot_week'] = week
+
+
+def get_espn_weekly_data():
+    """Load and persist ESPN weekly scores/projections without mutating live rosters."""
+    if league is None:
+        raise RuntimeError("ESPN league is not initialized")
+
+    league_instance = league
+    with weekly_data_lock:
+        cache = _load_weekly_data_cache(league_instance.year)
+        for week in range(1, 19):
+            needs_refresh = week in {
+                league_instance.current_week,
+                league_instance.current_week - 1,
+            }
+            if week in cache['fetched_weeks'] and not needs_refresh:
+                continue
+
+            try:
+                week_players = _fetch_espn_weekly_data(league_instance, week)
+            except Exception:
+                if week < league_instance.current_week:
+                    raise
+                logger.warning("Unable to fetch ESPN data for week %s", week, exc_info=True)
+                continue
+
+            for player_id, scores in week_players.items():
+                player_weeks = cache['players'].setdefault(player_id, {})
+                existing = player_weeks.get(str(week), {})
+                existing.update(scores)
+                player_weeks[str(week)] = existing
+            cache['fetched_weeks'].add(week)
+            _save_weekly_data_cache(cache)
+
+        _capture_current_week_ml_snapshots(cache, league_instance)
+        _save_weekly_data_cache(cache)
+        return cache['players']
+
+
+model_refresh_lock = RLock()
+
+
+def _refresh_models_for_completed_weeks():
+    if league is None or ml_projector is None:
+        return
+    completed_week = league.current_week - 1
+    if (
+        ml_projector.training_season == league.year
+        and ml_projector.training_through_week is not None
+        and ml_projector.training_through_week >= completed_week
+    ):
+        return
+
+    with model_refresh_lock:
+        if (
+            ml_projector.training_season == league.year
+            and ml_projector.training_through_week is not None
+            and ml_projector.training_through_week >= completed_week
+        ):
+            return
+        logger.info(
+            "Retraining models through completed week %s of season %s",
+            completed_week,
+            league.year,
+        )
+        ml_projector.train_models(
+            seasons=range(max(2019, league.year - 6), league.year + 1),
+            holdout_season=league.year - 1,
+            current_season=league.year,
+            through_week=league.current_week,
+        )
+        ml_projector.save_models(
+            os.path.join(os.path.dirname(__file__), '..', 'models')
+        )
+
+
+def _projection_comparison(cache: WeeklyDataCache | None, position: str):
+    if cache is None:
+        raise RuntimeError("Weekly projection cache has not been initialized")
+    if league is None:
+        raise RuntimeError("ESPN league is not initialized")
+    pairs = []
+    with weekly_data_lock:
+        for player_weeks in cache['players'].values():
+            for week_number, week_data in player_weeks.items():
+                if (
+                    int(week_number) >= league.current_week
+                    or week_data.get('position') != position
+                    or week_data.get('actual') is None
+                    or week_data.get('espn_projection_before_week') is None
+                    or week_data.get('ml_projection_before_week') is None
+                ):
+                    continue
+                actual = float(week_data['actual'])
+                pairs.append((
+                    actual,
+                    float(week_data['espn_projection_before_week']),
+                    float(week_data['ml_projection_before_week']),
+                ))
+
+    espn_mae = (
+        sum(abs(espn - actual) for actual, espn, _ in pairs) / len(pairs)
+        if pairs else None
+    )
+    ml_mae = (
+        sum(abs(prediction - actual) for actual, _, prediction in pairs) / len(pairs)
+        if pairs else None
+    )
+    minimum_sample = 30
+    ml_selected = (
+        len(pairs) >= minimum_sample
+        and ml_mae is not None
+        and espn_mae is not None
+        and ml_mae < espn_mae
+    )
+    return {
+        'weeks_evaluated': len(pairs),
+        'minimum_sample': minimum_sample,
+        'espn_mae': round(espn_mae, 2) if espn_mae is not None else None,
+        'ml_mae': round(ml_mae, 2) if ml_mae is not None else None,
+        'selected_source': 'ML' if ml_selected else 'ESPN',
+        'selection_reason': (
+            'ML has lower prospective MAE on the minimum sample'
+            if ml_selected
+            else 'ESPN remains the default until ML has lower MAE on at least '
+                 f'{minimum_sample} prospective player-weeks'
+        ),
+    }
+
 
 # Player Predictions
 @app.route('/predict/player', methods=['POST'])
@@ -57,59 +347,72 @@ def predict_player():
     Request body: {"player_name": "Patrick Mahomes", "position": "QB", "team": "KC"}
     """
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         player_name = data.get('player_name')
         pos = data.get('position')
-        team = data.get('team', '')
 
         if not player_name or not pos:
             return jsonify({"error": "player_name and position are required"}), 400
 
         if league is None:
-            return jsonify({"error": "league not initailized"}), 503
+            return jsonify({"error": "ESPN league is not initialized"}), 503
 
-        player_info = None
+        if ml_projector is None:
+            return jsonify({"error": "ML projector is not initialized"}), 503
+
+        _refresh_models_for_completed_weeks()
+        target_player = None
         for team_obj in league.teams:
             for player in team_obj.roster:
-                if player.name.lower() == player_name.lower():
-                    player_info = {
-                        'name': player.name,
-                        'position': pos,
-                        'team': team
-                    }
+                if (
+                    player.name.lower() == player_name.lower()
+                    and player.position.upper() == str(pos).upper()
+                ):
+                    target_player = player
                     break
-                if player_info:
-                    break
+            if target_player is not None:
+                break
 
-            if not player_info:
-                return jsonify({"error": "Player not found"}), 404
+        if target_player is None:
+            return jsonify({"error": "Player not found"}), 404
 
-            try: 
-                ml_result = ml_projector.predict_player_with_confidence(
-                    player_info['name'],
-                    player_info['position'],
-                    player_info['team']
-                )
-            except Exception as e:
-                logger.warning(f"ML prediction failed for {player_info['name']}: {e}")
-                ml_result = None
+        try:
+            ml_result = ml_projector.predict_player_with_confidence(
+                target_player.name,
+                target_player.position,
+                target_player.proTeam,
+                season=league.year,
+                as_of_week=league.current_week,
+                opponent=_player_opponent(target_player, league.current_week),
+            )
+        except Exception as e:
+            logger.warning(f"ML prediction failed for {target_player.name}: {e}")
+            ml_result = None
 
-            if ml_result is None:
-                return jsonify({
-                    "player": player_info['name'],
-                    "psition": player_info['position'],
-                    "predicted_points": None,
-                    "confidence": 0,
-                    "data_source": "unavaliable"
-                })
-
+        if ml_result is None:
+            current_stats = getattr(target_player, 'stats', {}).get(league.current_week, {})
+            espn_projection = current_stats.get('projected_points')
             return jsonify({
-                "player": player_info['name'],
-                "position": player_info['position'],
-                "predicted_points": ml_result["prediction"],
-                "confidence": ml_result["confidence"],
-                "data_source": ml_result.get("data_source", "model")
+                "player": target_player.name,
+                "position": target_player.position,
+                "predicted_points": (
+                    round(float(espn_projection), 2)
+                    if espn_projection is not None else None
+                ),
+                "confidence": None,
+                "data_source": (
+                    "espn_fallback" if espn_projection is not None else "unavailable"
+                )
             })
+
+        return jsonify({
+            "player": target_player.name,
+            "position": target_player.position,
+            "predicted_points": ml_result["prediction"],
+            "confidence": ml_result["confidence"],
+            "data_source": ml_result.get("data_source", "model"),
+            "opponent": _player_opponent(target_player, league.current_week),
+        })
 
     except Exception as e:
         logger.error(f"Error predicting player: {e}")
@@ -122,21 +425,63 @@ def get_weekly_projections():
     Get weekly projections for all players
     """
     try:
+        if league is None:
+            return jsonify({"error": "ESPN league is not initialized"}), 503
+        if ml_projector is None:
+            return jsonify({"error": "ML projector is not initialized"}), 503
+
+        _refresh_models_for_completed_weeks()
+        weekly_data = get_espn_weekly_data()
+        position_comparisons = {
+            player.position: _projection_comparison(weekly_data_cache, player.position)
+            for team in league.teams
+            for player in team.roster
+        }
         all_players = []
         for team in league.teams:
             for player in team.roster:
-                # Use ML predictions if available
-                ml_pred = ml_projector.predict_player(
-                    player.name,
-                    player.position,
-                    player.proTeam
+                try:
+                    ml_pred = ml_projector.predict_player(
+                        player.name,
+                        player.position,
+                        player.proTeam,
+                        season=league.year,
+                        as_of_week=league.current_week,
+                        opponent=_player_opponent(player, league.current_week),
+                    )
+                except Exception as error:
+                    logger.warning("ML projection failed for %s: %s", player.name, error)
+                    ml_pred = None
+                week_stats = getattr(player, 'stats', {}).get(league.current_week, {})
+                player_week_data = weekly_data.get(str(player.playerId), {}).get(
+                    str(league.current_week), {}
                 )
-                
+                espn_projection = player_week_data.get('espn_projection_before_week')
+                if espn_projection is None:
+                    espn_projection = week_stats.get('projected_points')
+                comparison = position_comparisons[player.position]
+                selected_source = comparison['selected_source']
+                projected_points = (
+                    ml_pred if selected_source == 'ML' else espn_projection
+                )
+                if projected_points is None:
+                    projected_points = ml_pred if ml_pred is not None else espn_projection
+                    if projected_points is not None:
+                        selected_source = 'ML' if ml_pred is not None else 'ESPN'
+
                 all_players.append({
                     "player_name": player.name,
                     "position": player.position,
                     "team": team.team_name,
-                    "projected_points": ml_pred if ml_pred else player.projected_avg_points,
+                    "projected_points": projected_points,
+                    "ml_projection": ml_pred,
+                    "espn_projection": espn_projection,
+                    "selected_source": (
+                        selected_source if projected_points is not None else "unavailable"
+                    ),
+                    "selection_reason": comparison['selection_reason'],
+                    "projection_comparison": comparison,
+                    "opponent": _player_opponent(player, league.current_week),
                     "pro_team": player.proTeam,
                     "injury_status": player.injuryStatus,
                     "percent_owned": player.percent_owned
@@ -154,6 +499,12 @@ def get_weekly_projections():
 @app.route('/analytics/player/<int:player_id>', methods=['GET'])
 def get_player_analytics(player_id):
     try:
+        if league is None:
+            return jsonify({"error": "ESPN league is not initialized"}), 503
+        if ml_projector is None:
+            return jsonify({"error": "ML projector is not initialized"}), 503
+
+        _refresh_models_for_completed_weeks()
         target_player = None
 
         for team in league.teams:
@@ -165,124 +516,132 @@ def get_player_analytics(player_id):
         if target_player is None:
             return jsonify({"error": "Player not found"}), 404
 
+        espn_weekly_data = get_espn_weekly_data()
+        player_weekly_data = espn_weekly_data.get(str(target_player.playerId), {})
         position = target_player.position
+        current_week = getattr(league, 'current_week', 1)
+        projection_comparison = _projection_comparison(
+            weekly_data_cache, position
+        )
+        current_opponent = _player_opponent(target_player, current_week)
 
         try: 
             ml_result = ml_projector.predict_player_with_confidence(
                 target_player.name,
                 position,
-                target_player.proTeam
+                target_player.proTeam,
+                season=league.year,
+                as_of_week=current_week,
+                opponent=current_opponent,
             )
         except Exception as e:
             logger.warning(f"ML prediction failed for {target_player.name}: {e}")
             ml_result = None
 
-        current_week = getattr(league, 'current_week', 1)
-
         if ml_result is None:
-            fallback_projection = getattr(
-                target_player,
-                'projected_avg_points',
-                0
-            ) or 0
             ml_result = {
-                "prediction": round(float(fallback_projection), 2),
-                "lower_bound": round(max(0, float(fallback_projection) * 0.7), 2),
-                "upper_bound": round(float(fallback_projection) * 1.3, 2),
-                "confidence": 0,
-                "data_source": "espn_fallback"
+                "prediction": None,
+                "lower_bound": None,
+                "upper_bound": None,
+                "confidence": None,
+                "data_source": "unavailable",
             }
 
         history = []
-
-        for week, week_data in getattr(target_player, 'stats', {}).items():
-            if not isinstance(week_data, dict):
-                continue
-
-            actual = week_data.get('points')
-            # ESPN's week 0 entry is a season-level projection, not a weekly value.
-            espn_projection = None if int(week) == 0 else week_data.get('projected_points')
-
-            if actual is None and espn_projection is None:
-                continue
-
-            history_item = {
-                "week": int(week),
-                "actual": round(float(actual or 0), 2),
-                "espn_projection": round(float(espn_projection or 0), 2)
+        for week in range(1, 19):
+            week_data = player_weekly_data.get(str(week), {})
+            actual = week_data.get('actual')
+            espn_proj = week_data.get('espn_projection_before_week')
+            item = {
+                "week": week,
+                "actual": (
+                    round(float(actual), 2)
+                    if actual is not None and week < current_week else None
+                ),
+                "espn_projection": (
+                    round(float(espn_proj), 2) if espn_proj is not None else None
+                ),
             }
 
-            if actual is not None and int(week) > 0:
-                try:
-                    historical_prediction = ml_projector.predict_player_with_confidence(
-                        target_player.name,
-                        position,
-                        target_player.proTeam,
-                        season=year,
-                        as_of_week=int(week)
-                    )
-                    if historical_prediction is not None:
-                        history_item["ml_projection"] = historical_prediction["prediction"]
-                except Exception as error:
-                    logger.warning(
-                        f"Historical ML prediction failed for {target_player.name} week {week}: {error}"
-                    )
+            if week_data.get('ml_projection_before_week') is not None:
+                item['ml_projection'] = round(
+                    float(week_data['ml_projection_before_week']), 2
+                )
 
-            history.append(history_item)
+            history.append(item)
 
-        history.sort(key=lambda item: item["week"])
-
-        evaluated_history = [
-            item for item in history
-            if item.get("ml_projection") is not None and item.get("actual") is not None
-        ]
-        errors = [item["ml_projection"] - item["actual"] for item in evaluated_history]
-        ml_evaluation = {
-            "weeks_evaluated": len(evaluated_history),
-            "mean_absolute_error": round(
-                sum(abs(error) for error in errors) / len(errors), 2
-            ) if errors else None,
-            "average_error": round(sum(errors) / len(errors), 2) if errors else None
-        }
+        history.sort(key=lambda i: i["week"])
 
         recent_actuals = [
             item["actual"] for item in history
-            if item["week"] <= current_week
+            if item["actual"] is not None
         ]
 
         recent_avg = (
             sum(recent_actuals[-5:]) / len(recent_actuals[-5:])
             if recent_actuals
-            else 0
+            else None
         )
 
         future_forecast = []
+        for week in range(current_week, 19):
+            try:
+                p = ml_projector.predict_player_with_confidence(
+                    target_player.name, position, target_player.proTeam,
+                    season=league.year, as_of_week=week,
+                    opponent=_player_opponent(target_player, week),
+                )
+            except Exception as e:
+                logger.warning(f"Forecast failed week {week}: {e}")
+                p = None
 
-        for week in range(current_week + 1, 15):
-            adjustment = 1 + ((week % 3) - 1 ) * 0.06
-            projection = ml_result["prediction"] * adjustment
+            week_data = player_weekly_data.get(str(week), {})
+            espn = week_data.get('espn_projection_before_week')
+            if espn is None:
+                espn = week_data.get('espn_projection')
+            if espn is not None:
+                espn = round(float(espn), 2)
 
+            if p is None or p.get("bye"):
+                future_forecast.append({"week": week, "bye": p is not None, "espn_projection": espn,
+                                        "ml_projection": None, "preferred_projection": espn,
+                                        "preferred_source": "ESPN" if espn is not None else "unavailable",
+                                        "lower_bound": None, "upper_bound": None})
+            else:
+                selected_source = projection_comparison['selected_source']
+                preferred = p["prediction"] if selected_source == 'ML' else espn
+                if preferred is None:
+                    preferred = p['prediction']
+                    selected_source = 'ML'
+                future_forecast.append({"week": week, "bye": False, "opponent": p.get("opponent"),
+                                        "espn_projection": espn, "ml_projection": p["prediction"],
+                                        "preferred_projection": preferred,
+                                        "preferred_source": selected_source,
+                                        "lower_bound": p["lower_bound"], "upper_bound": p["upper_bound"]})
 
-            future_forecast.append({
-                    "week": week,
-                    "espn_projection": None,
-                    "ml_projection": round(projection, 2),
-                    "lower_bound": round(
-                        max(0, projection - (
-                            ml_result["prediction"] -
-                            ml_result["lower_bound"]
-                        )),
-                        2
-                    ),
-                    "upper_bound": round(
-                        projection + (
-                            ml_result["upper_bound"] -
-                            ml_result["prediction"]
-                        ),
-                        2
-                    )
-                })
-
+        current_week_data = player_weekly_data.get(str(current_week), {})
+        current_espn_projection = current_week_data.get(
+            'espn_projection_before_week',
+            current_week_data.get('espn_projection'),
+        )
+        if current_espn_projection is None:
+            current_espn_projection = getattr(
+                target_player, 'stats', {}
+            ).get(current_week, {}).get('projected_points')
+        current_selected_source = projection_comparison['selected_source']
+        if current_selected_source == 'ML' and ml_result['prediction'] is None:
+            current_selected_source = (
+                'ESPN' if current_espn_projection is not None else 'unavailable'
+            )
+        elif current_selected_source == 'ESPN' and current_espn_projection is None:
+            current_selected_source = (
+                'ML' if ml_result['prediction'] is not None else 'unavailable'
+            )
+        current_projection = (
+            ml_result['prediction']
+            if current_selected_source == 'ML'
+            else current_espn_projection
+        )
 
         return jsonify({
             "player_id": player_id,
@@ -290,12 +649,19 @@ def get_player_analytics(player_id):
             "position": position,
             "team": target_player.proTeam,
             "current_week": current_week,
-            "recent_average": round(recent_avg, 2),
-            "current_projection": ml_result["prediction"],
+            "recent_average": round(recent_avg, 2) if recent_avg is not None else None,
+            "current_projection": current_projection,
+            "current_selected_source": current_selected_source,
+            "current_ml_projection": ml_result["prediction"],
+            "current_espn_projection": current_espn_projection,
             "confidence": ml_result["confidence"],
-            "data_source": ml_result.get("data_source", "model"),
+            "data_source": (
+                "model" if current_selected_source == "ML"
+                else "espn_fallback" if current_selected_source == "ESPN"
+                else "unavailable"
+            ),
             "history": history,
-            "ml_evaluation": ml_evaluation,
+            "projection_comparison": projection_comparison,
             "future_forecast": future_forecast
         })
 
@@ -308,6 +674,9 @@ def get_player_analytics(player_id):
 @app.route('/standings', methods=['GET'])
 def get_standings():
     try:
+        if league is None:
+            return jsonify({"error": "ESPN league is not initialized"}), 503
+
         standings = league.standings()
         standings_data = []
         for team in standings:
@@ -342,14 +711,17 @@ def get_standings():
 @app.route('/matchups', methods=['GET'])
 def get_matchups():
     try:
+        if league is None:
+            return jsonify({"error": "ESPN league is not initialized"}), 503
+
         matchups = league.box_scores()
         matchup_data = []
         for match in matchups:
             matchup_data.append({
-                "home_team": match.home_team.team_name,
+                "home_team": match.home_team.team_name if match.home_team else None,
                 "home_score": match.home_score,
                 "home_prodj": match.home_projected,
-                "away_team": match.away_team.team_name,
+                "away_team": match.away_team.team_name if match.away_team else None,
                 "away_score": match.away_score,
                 "away_prodj": match.away_projected,
                 "is_playoff": match.is_playoff,
@@ -363,6 +735,9 @@ def get_matchups():
 @app.route('/team/<int:team_id>/roster', methods=['GET'])
 def get_team_roster(team_id):
     try:
+        if league is None:
+            return jsonify({"error": "ESPN league is not initialized"}), 503
+
         team = next((team for team in league.teams if team.team_id == team_id), None)
         if not team:
             return jsonify(f"No team found for id {team_id}"), 404
@@ -441,6 +816,9 @@ def get_team_roster(team_id):
 @app.route('/teams', methods=['GET'])
 def get_team():
     try:
+        if league is None:
+            return jsonify({"error": "ESPN league is not initialized"}), 503
+
         teams = league.teams
         team_list = []
         for team in teams:

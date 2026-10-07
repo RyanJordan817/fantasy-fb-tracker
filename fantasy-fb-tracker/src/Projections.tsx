@@ -4,7 +4,12 @@ interface Projections {
     player_name: string;
     position: string;
     team: string;
-    projected_points: number;
+    projected_points: number | null;
+    ml_projection: number | null;
+    espn_projection: number | null;
+    selected_source: 'ML' | 'ESPN' | 'unavailable';
+    selection_reason: string;
+    opponent: string | null;
     pro_team: string;
     injury_status: string;
     percent_owned: number;
@@ -76,8 +81,19 @@ const Projections: React.FC = () => {
                             </div>
                         </div>
                         <div className="projected-points">
-                            <span className="points">{player.projected_points?.toFixed(2) || 'N/A'}</span>
+                            <span className="points">{player.projected_points?.toFixed(2) ?? 'N/A'}</span>
                             <span className="points-label">pts</span>
+                            <span className="points-label">
+                                Selected: {player.selected_source}
+                            </span>
+                            <span className="points-label" title={player.selection_reason}>
+                                ESPN {player.espn_projection?.toFixed(1) ?? 'N/A'}
+                                {' / '}
+                                ML {player.ml_projection?.toFixed(1) ?? 'N/A'}
+                            </span>
+                            {player.opponent && (
+                                <span className="points-label">vs {player.opponent}</span>
+                            )}
                         </div>
                     </div>
                 ))}
